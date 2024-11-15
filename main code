@@ -1,0 +1,134 @@
+main code -
+#include <iostream>
+#include <unordered_map>
+#include <queue>
+#include <set>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+// User class for user details
+class User {
+public:
+    string userId;
+    string userName;
+    bool isOnline;
+
+    User(string id, string name) : userId(id), userName(name), isOnline(false) {}
+};
+
+// Chat Manager for handling messages and users
+class ChatManager {
+private:
+    unordered_map<string, User*> users; // UserID -> User object
+    unordered_map<string, set<string>> friendGraph; // UserID -> Friends
+    unordered_map<string, queue<string>> messageQueues; // UserID -> Message queue
+
+    mutex mtx; // For thread-safety
+    condition_variable cv; // For notifying threads
+
+public:
+    // Add a user to the system
+    void addUser(string userId, string userName) {
+        lock_guard<mutex> lock(mtx);
+        if (users.find(userId) == users.end()) {
+            users[userId] = new User(userId, userName);
+            cout << "User " << userName << " added successfully.\n";
+        } else {
+            cout << "User ID already exists!\n";
+        }
+    }
+
+    // Add a friend connection (Graph-based mapping)
+    void addFriend(string userId1, string userId2) {
+        lock_guard<mutex> lock(mtx);
+        friendGraph[userId1].insert(userId2);
+        friendGraph[userId2].insert(userId1);
+        cout << "Friend connection established between " << userId1 << " and " << userId2 << ".\n";
+    }
+
+    // User goes online
+    void userOnline(string userId) {
+        lock_guard<mutex> lock(mtx);
+        if (users.find(userId) != users.end()) {
+            users[userId]->isOnline = true;
+            cout << users[userId]->userName << " is now online.\n";
+        } else {
+            cout << "User not found.\n";
+        }
+    }
+
+    // User goes offline
+    void userOffline(string userId) {
+        lock_guard<mutex> lock(mtx);
+        if (users.find(userId) != users.end()) {
+            users[userId]->isOnline = false;
+            cout << users[userId]->userName << " is now offline.\n";
+        } else {
+            cout << "User not found.\n";
+        }
+    }
+
+    // Send a message
+    void sendMessage(string senderId, string receiverId, string message) {
+        lock_guard<mutex> lock(mtx);
+        if (users.find(receiverId) != users.end()) {
+            string formattedMessage = "From " + senderId + ": " + message;
+            messageQueues[receiverId].push(formattedMessage);
+            cout << "Message sent from " << senderId << " to " << receiverId << ".\n";
+            cv.notify_all(); // Notify waiting threads
+        } else {
+            cout << "Receiver not found.\n";
+        }
+    }
+
+    // Receive messages (real-time simulation)
+    void receiveMessages(string userId) {
+        unique_lock<mutex> lock(mtx);
+        while (true) {
+            cv.wait(lock, [&] { return !messageQueues[userId].empty(); });
+            while (!messageQueues[userId].empty()) {
+                string message = messageQueues[userId].front();
+                messageQueues[userId].pop();
+                cout << "Message for " << userId << ": " << message << "\n";
+            }
+        }
+    }
+};
+
+int main() {
+    ChatManager chatApp;
+
+    // Adding users
+    chatApp.addUser("U1", "Alice");
+    chatApp.addUser("U2", "Bob");
+    chatApp.addUser("U3", "Charlie");
+
+    // Establishing friend connections
+    chatApp.addFriend("U1", "U2");
+    chatApp.addFriend("U2", "U3");
+
+    // Simulating real-time messaging with threads
+    thread t1([&] {
+        chatApp.userOnline("U1");
+        this_thread::sleep_for(chrono::seconds(1));
+        chatApp.sendMessage("U1", "U2", "Hello Bob!");
+        this_thread::sleep_for(chrono::seconds(2));
+        chatApp.userOffline("U1");
+    });
+
+    thread t2([&] {
+        chatApp.userOnline("U2");
+        chatApp.receiveMessages("U2");
+        chatApp.userOffline("U2");
+    });
+
+    t1.join();
+    t2.detach();
+
+    return 0;
+}
